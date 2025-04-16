@@ -8,13 +8,14 @@
 #include <stdbool.h>
 #include "leds.h"
 #include "delay.h"
+#include "gpio.h"
 
-#define BUFF_SIZE 128           // Read buffer length
+#define BUFF_SIZE 128           // Max buffer length
 #define TIMER_PERIOD 500000     // Timer interval in microseconds
 
 Queue rx_queue; // Queue for storing received UART characters
 
-// UART receive interrupt handler — stores characters into a queue
+// UART ISR — stores characters into a queue
 void uart_rx_isr(uint8_t rx) {
     if (rx >= 0x00 && rx <= 0x7F) {
         queue_enqueue(&rx_queue, rx);
@@ -23,17 +24,20 @@ void uart_rx_isr(uint8_t rx) {
 
 // Global buffers and flags
 char buff[BUFF_SIZE];                   // Buffer to store received number as string
-uint8_t volatile currentBuffIndex = 0;  // Tracks current digit being processed
-char msg[32];                           // UART message buffer
-volatile bool input_ready = false;      // Flag: true when number is entered and ready for processing
-volatile bool is_led_on = false;        // State of the LED
+volatile uint8_t currentBuffIndex = 0;  // Tracks current digit being processed
+char led_msg[32];                       // UART message buffer (LED)
+char button_msg[56];										// UART message buffer (button)
+volatile bool input_ready = false;      // Flag: true when Enter is pressed
+volatile bool is_led_on = false;       
+volatile uint8_t button_count = 0;
+volatile bool is_button_pressed = false;
 
 // Timer ISR — processes one digit per interrupt
 void timer_isr() {
     // If all digits have been processed, stop timer
     if (buff[currentBuffIndex] == '\0' && input_ready) {
 			timer_disable();
-			uart_print("End of sequence. Waiting for new number...");
+			uart_print("End of sequence. Waiting for new number...\r\n");
 			return;
     }
 
@@ -48,35 +52,73 @@ void timer_isr() {
 
     // Handle even/odd digit behavior
     if (digit % 2) {
-			sprintf(msg, "Digit %d -> Toggle LED\r\n", digit);
-			uart_print(msg);
-			is_led_on = !is_led_on;
-			if (is_led_on) {
-				leds_set(1, 0, 0);
+			if (is_button_pressed)
+				sprintf(led_msg, "Digit %d -> Skipped LED action\r\n", digit);
+			else {
+				sprintf(led_msg, "Digit %d -> Toggle LED\r\n", digit);
+				is_led_on = !is_led_on;
+				if (is_led_on)
+					leds_set(1, 0, 0);
+				else 
+					leds_set (0,0,0);
 			}
-			else 
-				leds_set (0,0,0);
+			
+			uart_print(led_msg);
     } 
 		else {
-			sprintf(msg, "Digit %d -> Blink LED\r\n", digit);
-			uart_print(msg);
-			if (is_led_on) {	
-				leds_set(0, 0, 0);
-				delay_ms(200);
-				leds_set(1, 0, 0);
-				delay_ms(200);
-			}
+			if (is_button_pressed)
+				sprintf(led_msg, "Digit %d -> Skipped LED action\r\n", digit);
 			else {
-				leds_set(1, 0, 0);
-				delay_ms(200);
-				leds_set(0, 0, 0);
-				delay_ms(200);
+				sprintf(led_msg, "Digit %d -> Blink LED\r\n", digit);
+				
+				if (is_led_on) {	
+					leds_set(0, 0, 0);
+					delay_ms(200);
+					leds_set(1, 0, 0);
+					delay_ms(200);
+				}
+				else {
+					leds_set(1, 0, 0);
+					delay_ms(200);
+					leds_set(0, 0, 0);
+					delay_ms(200);
+				}
 			}
+			
+			uart_print(led_msg);
 		}
 			
 
     currentBuffIndex++; // Move to next digit for next timer tick
 		
+}
+
+
+// Button ISR
+void button_isr(int status) {
+	if (status == 13) {
+		button_count++;
+		if(is_button_pressed) {
+			if (input_ready) {	// for display purposes, newline problems
+				sprintf(button_msg, "Interrupt: Button pressed. LED unlocked. Count = %d\r\n", button_count);
+			} 
+			else {
+				sprintf(button_msg, "\r\nInterrupt: Button pressed. LED unlocked. Count = %d\r\n", button_count);
+			}
+			is_button_pressed = false;
+		}
+		else {
+			if (input_ready) {	// for display purposes, newline problems
+				sprintf(button_msg, "Interrupt: Button pressed. LED locked. Count = %d\r\n", button_count);
+			} 
+			else {
+				sprintf(button_msg, "\r\nInterrupt: Button pressed. LED locked. Count = %d\r\n", button_count);
+			}
+			is_button_pressed = true;
+		}
+		uart_print(button_msg);
+	}
+	
 }
 
 
@@ -89,6 +131,13 @@ int main() {
     uart_enable();
     timer_init(TIMER_PERIOD);
     timer_set_callback(timer_isr);
+    gpio_set_mode(P_SW, PullUp);          // Button --> Pullup
+    gpio_set_trigger(P_SW, Rising);      // Trigger on press (falling edge)
+    gpio_set_callback(P_SW, button_isr); 
+	
+		NVIC_SetPriority(EXTI15_10_IRQn, 0);  // Button on EXTI15_10
+    NVIC_SetPriority(USART2_IRQn, 1);     // UART has lower priority
+	
     __enable_irq(); // Enable global interrupts
 
     uint8_t rx_char = 0;
@@ -106,7 +155,7 @@ int main() {
 					timer_disable();             		// Stop current analysis
 					input_ready = false;         		// Mark as ready for new input
 					currentBuffIndex = 0;        		// Reset digit index
-					uart_print("\r\n\nInput:");    		// Prompt again
+					uart_print("\r\nInput:");    		// Prompt again
 					buff_index = 0;              		// Reset buffer index
 					memset(buff, 0, sizeof(buff)); 	// Clear the buffer completely
         }
