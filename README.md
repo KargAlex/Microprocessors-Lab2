@@ -53,26 +53,26 @@ This embedded systems project implements a number-processing routine on the STM3
 
 ## Example UART Output
 
-Input: 52719 
+Input: 52719   
 Digit 5 -> Toggle LED  
 Digit 2 -> Blink LED  
-Digit 7 -> Toggle LED   
-Interrupt: Button pressed. LED locked. Count = 1 
-Digit 1 -> Skipped LED action 
-Digit 9 -> Skipped LED action 
-Interrupt: Button pressed. LED unlocked. Count = 2 
-End of sequence. Waiting for new number...
+Digit 7 -> Toggle LED    
+Interrupt: Button pressed. LED locked. Count = 1  
+Digit 1 -> Skipped LED action  
+Digit 9 -> Skipped LED action  
+Interrupt: Button pressed. LED unlocked. Count = 2  
+End of sequence. Waiting for new number... 
 
-Input: 81- 
-Digit 8 -> Blink LED 
-Digit 1 -> Toggle LED 
-Digit 8 -> Blink LED 
-Digit 1 -> Toggle LED 
-... (New input received) 
-Input: 42 
-Digit 4 -> Blink LED 
-Digit 2 -> Blink LED 
-End of sequence. Waiting for new number...
+Input: 81-  
+Digit 8 -> Blink LED  
+Digit 1 -> Toggle LED  
+Digit 8 -> Blink LED  
+Digit 1 -> Toggle LED  
+... (New input received)  
+Input: 42  
+Digit 4 -> Blink LED  
+Digit 2 -> Blink LED  
+End of sequence. Waiting for new number... 
 
 ## Files
 - `main.c` – Core logic: UART input handling, digit analysis, LED control, timer and button interrupts.
