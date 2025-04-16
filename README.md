@@ -54,9 +54,9 @@ This embedded systems project implements a number-processing routine on the STM3
 ## Example UART Output
 
 Input: 52719 
-Digit 5 -> Toggle LED 
-Digit 2 -> Blink LED 
-Digit 7 -> Toggle LED 
+Digit 5 -> Toggle LED  
+Digit 2 -> Blink LED  
+Digit 7 -> Toggle LED   
 Interrupt: Button pressed. LED locked. Count = 1 
 Digit 1 -> Skipped LED action 
 Digit 9 -> Skipped LED action 
