@@ -27,7 +27,7 @@ char buff[BUFF_SIZE];                   // Buffer to store received number as st
 volatile uint8_t currentBuffIndex = 0;  // Tracks current digit being processed
 char led_msg[32];                       // UART message buffer (LED)
 char button_msg[56];										// UART message buffer (button)
-volatile bool input_ready = false;      // Flag: true when Enter is pressed
+volatile bool input_ready = false;      // Flag: Tracks whether we're processing input (true) or waiting for new input (false)
 volatile bool is_led_on = false;       
 volatile uint8_t button_count = 0;
 volatile bool is_button_pressed = false;
@@ -153,8 +153,7 @@ int main() {
         // If input is already being processed (timer active), cancel it immediately
         if (input_ready) {
 					timer_disable();             		// Stop current analysis
-					input_ready = false;         		// Mark as ready for new input
-					currentBuffIndex = 0;        		// Reset digit index
+					input_ready = false;         		// Mark as ready for new inputx
 					uart_print("\r\nInput:");    		// Prompt again
 					buff_index = 0;              		// Reset buffer index
 					memset(buff, 0, sizeof(buff)); 	// Clear the buffer completely
