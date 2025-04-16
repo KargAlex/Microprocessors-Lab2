@@ -6,7 +6,7 @@ This embedded systems project implements a number-processing routine on the STM3
 ## Requirements
 - **Microcontroller:** Nucleo STM32F401RE  
 - **Tools:** Keil uVision, PuTTY/Tera Term  
-- **Languages:** C (main logic), ARM CMSIS  
+- **Languages:** C  
 
 ## Functionality
 
