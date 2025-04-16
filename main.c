@@ -12,6 +12,7 @@
 
 #define BUFF_SIZE 128           // Max buffer length
 #define TIMER_PERIOD 500000     // Timer interval in microseconds
+#define BUTTON_PIN 13 					// PC13
 
 Queue rx_queue; // Queue for storing received UART characters
 
@@ -27,15 +28,20 @@ char buff[BUFF_SIZE];                   // Buffer to store received number as st
 volatile uint8_t currentBuffIndex = 0;  // Tracks current digit being processed
 char led_msg[32];                       // UART message buffer (LED)
 char button_msg[56];										// UART message buffer (button)
-volatile bool input_ready = false;      // Flag: Tracks whether we're processing input (true) or waiting for new input (false)
+volatile bool input_ready = false;      // Tracks whether we're processing input (true) or waiting for new input (false)
 volatile bool is_led_on = false;       
 volatile uint8_t button_count = 0;
 volatile bool is_button_pressed = false;
+volatile bool repeat_proccess = false;	// Tracks whether '-' is at the end of an input
 
 // Timer ISR — processes one digit per interrupt
 void timer_isr() {
     // If all digits have been processed, stop timer
     if (buff[currentBuffIndex] == '\0' && input_ready) {
+			if (repeat_proccess) {
+				currentBuffIndex = 0;
+				return;
+			}
 			timer_disable();
 			uart_print("End of sequence. Waiting for new number...\r\n");
 			return;
@@ -96,7 +102,7 @@ void timer_isr() {
 
 // Button ISR
 void button_isr(int status) {
-	if (status == 13) {
+	if (status == BUTTON_PIN) {
 		button_count++;
 		if(is_button_pressed) {
 			if (input_ready) {	// for display purposes, newline problems
@@ -131,12 +137,12 @@ int main() {
     uart_enable();
     timer_init(TIMER_PERIOD);
     timer_set_callback(timer_isr);
-    gpio_set_mode(P_SW, PullUp);          // Button --> Pullup
-    gpio_set_trigger(P_SW, Rising);      // Trigger on press (falling edge)
+    gpio_set_mode(P_SW, PullDown);          // Button --> Pulldown
+    gpio_set_trigger(P_SW, Rising);      // Trigger on rising edge
     gpio_set_callback(P_SW, button_isr); 
 	
 		NVIC_SetPriority(EXTI15_10_IRQn, 0);  // Button on EXTI15_10
-    NVIC_SetPriority(USART2_IRQn, 1);     // UART has lower priority
+    NVIC_SetPriority(USART2_IRQn, 1);     
 	
     __enable_irq(); // Enable global interrupts
 
@@ -148,42 +154,47 @@ int main() {
     while (1) {
         // Wait for input characters
         while (!queue_dequeue(&rx_queue, &rx_char))
-            __WFI(); // Sleep until interrupt fires
+					__WFI(); // Sleep until interrupt fires
 
-        // If input is already being processed (timer active), cancel it immediately
+        // If input is already being processed and you have new input, cancel old proccess immediately
         if (input_ready) {
+					repeat_proccess = false;
 					timer_disable();             		// Stop current analysis
-					input_ready = false;         		// Mark as ready for new inputx
-					uart_print("\r\nInput:");    		// Prompt again
-					buff_index = 0;              		// Reset buffer index
+					input_ready = false;         		// Mark as ready for new input
+					uart_print("\r\nInput:");    	
+					buff_index = 0;
 					memset(buff, 0, sizeof(buff)); 	// Clear the buffer completely
         }
 
         // Handle backspace
         if (rx_char == 0x7F) {
-            if (buff_index > 0) {
-                buff_index--;
-                uart_tx(rx_char); // Echo backspace
-            }
+					if (buff_index > 0) {
+							buff_index--;
+							uart_tx(rx_char); // Echo backspace
+					}
         } else {
-            // Echo character and store
-            uart_tx(rx_char);
-            buff[buff_index++] = (char)rx_char;
+					// Echo character and store
+					uart_tx(rx_char);
+					buff[buff_index++] = (char)rx_char;
         }
 
         // If Enter was pressed, mark input complete and start processing
         if (rx_char == '\r') {
-            buff[buff_index - 1] = '\0';  // Replace '\r' with string terminator
-            uart_print("\r\n");           // Newline after input
-            currentBuffIndex = 0;         // Reset digit processing index
-            input_ready = true;           // Mark input as ready for analysis
-            timer_enable();               // Begin timer-based digit processing
+					if (buff[buff_index -2] == '-')
+						repeat_proccess = true;			// If last character is '-', repeat proccess
+					buff[buff_index - 1] = '\0';  // Replace '\r' with string terminator
+					uart_print("\r\n");           
+					currentBuffIndex = 0;         
+					input_ready = true;           // Mark input as ready for proccessing
+					timer_enable();               // Begin digit proccessing
         }
 
         // Buffer overflow warning
         if (buff_index >= BUFF_SIZE) {
-            uart_print("Stop trying to overflow my buffer! I resent that!\r\n");
-            buff_index = 0;
+					uart_print("Stop trying to overflow my buffer! I resent that!\r\n");
+					buff_index = 0;
         }
+				
+				
     }
 }
