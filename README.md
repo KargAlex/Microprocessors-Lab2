@@ -1,7 +1,7 @@
 # ARM Assembly & C Project – UART-Controlled LED Processing with Button Interrupt
 
 ## Overview
-This embedded systems project implements a number-processing routine on the STM32F401RE using C (with ARM CMSIS libraries), designed for the **Microprocessors & Peripherals** course at AUTH (Spring 2025). The program takes a numerical input over UART, processes each digit every 0.5 seconds using a hardware timer, and controls an onboard LED depending on digit parity. Additionally, a hardware button can interrupt and control LED behavior dynamically.
+This embedded systems project implements a number-processing routine on the STM32F401RE using C (with ARM CMSIS libraries). The program takes a numerical input over UART, processes each digit every 0.5 seconds using a hardware timer, and controls an onboard LED. Additionally, a hardware button can interrupt and control LED behavior dynamically.
 
 ## Requirements
 - **Microcontroller:** Nucleo STM32F401RE  
