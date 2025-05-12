@@ -32,7 +32,9 @@ volatile bool input_ready = false;      // Tracks whether we're processing input
 volatile bool is_led_on = false;       
 volatile uint8_t button_count = 0;
 volatile bool is_button_pressed = false;
-volatile bool repeat_proccess = false;	// Tracks whether '-' is at the end of an input
+volatile bool repeat_proccess = false;	// Tracks if '-' is at end of input
+volatile bool print_msg_button = false;
+volatile bool print_msg_led = false;
 
 // Timer ISR — processes one digit per interrupt
 void timer_isr() {
@@ -68,8 +70,6 @@ void timer_isr() {
 				else 
 					leds_set (0,0,0);
 			}
-			
-			uart_print(led_msg);
     } 
 		else {
 			if (is_button_pressed)
@@ -82,27 +82,32 @@ void timer_isr() {
 					delay_ms(200);
 					leds_set(1, 0, 0);
 					delay_ms(200);
+					leds_set(0, 0, 0);
+					
+					is_led_on = false;
 				}
 				else {
 					leds_set(1, 0, 0);
 					delay_ms(200);
 					leds_set(0, 0, 0);
 					delay_ms(200);
+					leds_set(1, 0, 0);
+					
+					is_led_on = true;
 				}
 			}
-			
-			uart_print(led_msg);
 		}
 			
-
+		print_msg_led = true;
+		
     currentBuffIndex++; // Move to next digit for next timer tick
 		
 }
 
 
 // Button ISR
-void button_isr(int status) {
-	if (status == BUTTON_PIN) {
+void button_isr(int pin_index) {
+	if (pin_index	== BUTTON_PIN) {
 		button_count++;
 		if(is_button_pressed) {
 			if (input_ready) {	// for display purposes, newline problems
@@ -122,7 +127,7 @@ void button_isr(int status) {
 			}
 			is_button_pressed = true;
 		}
-		uart_print(button_msg);
+		print_msg_button = true;
 	}
 	
 }
@@ -138,7 +143,7 @@ int main() {
     timer_init(TIMER_PERIOD);
     timer_set_callback(timer_isr);
     gpio_set_mode(P_SW, PullDown);          // Button --> Pulldown
-    gpio_set_trigger(P_SW, Rising);      // Trigger on rising edge
+    gpio_set_trigger(P_SW, Rising);      		// Trigger on rising edge
     gpio_set_callback(P_SW, button_isr); 
 	
 		NVIC_SetPriority(EXTI15_10_IRQn, 0);  // Button on EXTI15_10
@@ -153,8 +158,19 @@ int main() {
 
     while (1) {
         // Wait for input characters
-        while (!queue_dequeue(&rx_queue, &rx_char))
+        while (!queue_dequeue(&rx_queue, &rx_char)) {
+					
+					if (print_msg_button) {
+            uart_print(button_msg);    
+            print_msg_button = false;
+					}
+					
+					if (print_msg_led) {
+						uart_print(led_msg);
+						print_msg_led = false;
+					}
 					__WFI(); // Sleep until interrupt fires
+				}
 
         // If input is already being processed and you have new input, cancel old proccess immediately
         if (input_ready) {
