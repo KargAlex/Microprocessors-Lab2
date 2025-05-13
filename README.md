@@ -79,5 +79,4 @@ End of sequence. Waiting for new number...
 - `Drivers`
 ---
 
-#######📌 *Developed for the "Microprocessors & Peripherals" 8th semester course, AUTh, Spring 2025.*
-=======
+📌 *Developed for the "Microprocessors & Peripherals" 8th semester course, AUTh, Spring 2025.*
