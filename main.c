@@ -25,7 +25,7 @@ void uart_rx_isr(uint8_t rx) {
 
 // Global buffers and flags
 char buff[BUFF_SIZE];                   // Buffer to store received number as string
-volatile uint8_t currentBuffIndex = 0;  // Tracks current digit being processed
+volatile uint8_t currentBuffIndex = 0;  // Tracks current digit processed
 char led_msg[32];                       // UART message buffer (LED)
 char button_msg[56];										// UART message buffer (button)
 volatile bool input_ready = false;      // Tracks whether we're processing input (true) or waiting for new input (false)
@@ -116,7 +116,6 @@ void button_isr(int pin_index) {
 			else {
 				sprintf(button_msg, "\r\nInterrupt: Button pressed. LED unlocked. Count = %d\r\n", button_count);
 			}
-			is_button_pressed = false;
 		}
 		else {
 			if (input_ready) {	// for display purposes, newline problems
@@ -125,8 +124,8 @@ void button_isr(int pin_index) {
 			else {
 				sprintf(button_msg, "\r\nInterrupt: Button pressed. LED locked. Count = %d\r\n", button_count);
 			}
-			is_button_pressed = true;
 		}
+		is_button_pressed =  !is_button_pressed;
 		print_msg_button = true;
 	}
 	
