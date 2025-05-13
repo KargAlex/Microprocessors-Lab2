@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # ARM Assembly & C Project – UART-Controlled LED Processing with Button Interrupt
 
 ## Overview
