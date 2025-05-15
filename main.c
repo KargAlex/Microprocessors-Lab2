@@ -4,212 +4,220 @@
 #include "uart.h"
 #include <string.h>
 #include "queue.h"
-#include "timer.h"
-#include <stdbool.h>
 #include "leds.h"
 #include "delay.h"
+#include "timer.h"
 #include "gpio.h"
 
-#define BUFF_SIZE 128           // Max buffer length
-#define TIMER_PERIOD 500000     // Timer interval in microseconds
-#define BUTTON_PIN 13 					// PC13
+// === Constants ===
+#define BUFF_SIZE 64
+#define BUTTON_PIN P_SW
+#define BUTTON 13
 
-Queue rx_queue; // Queue for storing received UART characters
+Queue rx_queue; // Queue for storing received characters
 
-// UART ISR — stores characters into a queue
-void uart_rx_isr(uint8_t rx) {
-    if (rx >= 0x00 && rx <= 0x7F) {
-        queue_enqueue(&rx_queue, rx);
+// === Global State ===
+uint8_t input_length = 0;
+uint8_t current_digit_index = 0;
+volatile uint8_t digit_ready = 0;
+volatile uint8_t new_input_received = 0;
+volatile uint8_t input_active = 0;
+volatile uint8_t button_press_count = 0;
+
+// Led logic
+volatile uint8_t led_locked = 0;
+volatile uint8_t timer = 0;
+volatile uint8_t blink_count = 0;
+volatile uint8_t led_status = 0;
+
+
+char input_staging[BUFF_SIZE]; // separate buffer for typing
+int staging_index = 0;         // index into staging
+
+void handle_uart_input(void) {
+    uint8_t rx_char;
+    static uint8_t input_prompt_shown = 0;
+
+    while (queue_dequeue(&rx_queue, &rx_char)) {
+        // Backspace (0x7F)
+        if (rx_char == 0x7F) {
+            if (staging_index > 0) {
+                staging_index--;
+                uart_print("\b \b");  // Erase last character on terminal
+            }
+        }
+
+        // Enter
+        else if (rx_char == '\r') {
+            input_staging[staging_index] = '\0';
+            new_input_received = 1;
+            staging_index = 0;
+            input_prompt_shown = 0; // reset for next input
+            uart_print("\r\n"); // move to new line
+        }
+
+        // Normal character
+        else if (staging_index < BUFF_SIZE - 1) {
+            // If we're starting to type, cancel previous analysis
+            if (input_active) {
+                input_active = 0;
+                timer_disable();
+                input_prompt_shown = 0; // reset for prompt display
+                staging_index = 0; // reset current buffer
+								memset(input_staging, 0, sizeof(input_staging)); 	// Clear the buffer 
+            }
+
+            if (!input_prompt_shown) {
+                uart_print("\nInput: ");
+                input_prompt_shown = 1;
+            }
+
+            input_staging[staging_index++] = rx_char;
+
+            // Echo character to screen
+            char s[2] = {rx_char, '\0'};
+            uart_print(s);
+        }
     }
 }
 
-// Global buffers and flags
-char buff[BUFF_SIZE];                   // Buffer to store received number as string
-volatile uint8_t currentBuffIndex = 0;  // Tracks current digit processed
-char led_msg[32];                       // UART message buffer (LED)
-char button_msg[56];										// UART message buffer (button)
-volatile bool input_ready = false;      // Tracks whether we're processing input (true) or waiting for new input (false)
-volatile bool is_led_on = false;       
-volatile uint8_t button_count = 0;
-volatile bool is_button_pressed = false;
-volatile bool repeat_proccess = false;	// Tracks if '-' is at end of input
-volatile bool print_msg_button = false;
-volatile bool print_msg_led = false;
 
-// Timer ISR — processes one digit per interrupt
-void timer_isr() {
-    // If all digits have been processed, stop timer
-    if (buff[currentBuffIndex] == '\0' && input_ready) {
-			if (repeat_proccess) {
-				currentBuffIndex = 0;
-				return;
-			}
-			timer_disable();
-			uart_print("End of sequence. Waiting for new number...\r\n");
-			return;
-    }
+// Interrupt Service Routine for UART receive
+void uart_rx_isr(uint8_t rx) {
+	// Check if the received character is a printable ASCII character
+	if (rx >= 0x0 && rx <= 0x7F ) {
+		// Store the received character
+		queue_enqueue(&rx_queue, rx);
+	}
+}
 
-    // Convert current digit from ASCII to integer
-    int digit = buff[currentBuffIndex] - '0';
+void button_callback(int num) {
+    
+	if(num == BUTTON) {
+		led_locked = !led_locked;
+		button_press_count++;
 
-    // Skip non-digit characters
-    if (digit < 0 || digit > 9) {
-        currentBuffIndex++;
+    if (led_locked)
+        uart_print("Interrupt: Button pressed. LED locked. Count = ");
+    else
+        uart_print("Interrupt: Button pressed. LED unlocked. Count = ");
+
+		char str[12];
+		sprintf(str, "%d\r\n", button_press_count);
+		uart_print(str);
+	}
+}
+
+
+// === Digit Handler ===
+void process_digit(char digit_char)
+{
+    int digit = digit_char - '0';
+    char msg[32];
+    sprintf(msg, "Digit %d -> ", digit);
+	
+    if (led_locked) {
+        strcat(msg, "Skipped LED action\r\n");
+        uart_print(msg);
         return;
     }
 
-    // Handle even/odd digit behavior
-    if (digit % 2) {
-			if (is_button_pressed)
-				sprintf(led_msg, "Digit %d -> Skipped LED action\r\n", digit);
-			else {
-				sprintf(led_msg, "Digit %d -> Toggle LED\r\n", digit);
-				is_led_on = !is_led_on;
-				if (is_led_on)
-					leds_set(1, 0, 0);
-				else 
-					leds_set (0,0,0);
-			}
-    } 
-		else {
-			if (is_button_pressed)
-				sprintf(led_msg, "Digit %d -> Skipped LED action\r\n", digit);
-			else {
-				sprintf(led_msg, "Digit %d -> Blink LED\r\n", digit);
-				
-				if (is_led_on) {	
-					leds_set(0, 0, 0);
-					delay_ms(200);
-					leds_set(1, 0, 0);
-					delay_ms(200);
-					leds_set(0, 0, 0);
-					
-					is_led_on = false;
-				}
-				else {
-					leds_set(1, 0, 0);
-					delay_ms(200);
-					leds_set(0, 0, 0);
-					delay_ms(200);
-					leds_set(1, 0, 0);
-					
-					is_led_on = true;
-				}
-			}
-		}
-			
-		print_msg_led = true;
-		
-    currentBuffIndex++; // Move to next digit for next timer tick
-		
+    if (digit % 2 == 0) {
+        strcat(msg, "Blink LED\r\n");
+				//call_led_callback_twice()
+        blink_count = 2;
+    } else {
+        strcat(msg, "Toggle LED\r\n");
+				//call_led_callback_once
+        blink_count = 1;
+    }
+
+    uart_print(msg);
 }
 
 
-// Button ISR
-void button_isr(int pin_index) {
-	if (pin_index	== BUTTON_PIN) {
-		button_count++;
-		if(is_button_pressed) {
-			if (input_ready) {	// for display purposes, newline problems
-				sprintf(button_msg, "Interrupt: Button pressed. LED unlocked. Count = %d\r\n", button_count);
-			} 
-			else {
-				sprintf(button_msg, "\r\nInterrupt: Button pressed. LED unlocked. Count = %d\r\n", button_count);
-			}
-		}
-		else {
-			if (input_ready) {	// for display purposes, newline problems
-				sprintf(button_msg, "Interrupt: Button pressed. LED locked. Count = %d\r\n", button_count);
-			} 
-			else {
-				sprintf(button_msg, "\r\nInterrupt: Button pressed. LED locked. Count = %d\r\n", button_count);
-			}
-		}
-		is_button_pressed =  !is_button_pressed;
-		print_msg_button = true;
-	}
+void timer_callback(void){
+	timer++;
 	
+	if (timer % 2 == 0) {
+		if(blink_count > 0) {
+			blink_count--;
+			if (!led_locked) {
+				led_status = !led_status;
+				leds_set(led_status, 0,0);
+			}
+		}
+	}
+		
+	if (timer % 5 == 0) {
+		digit_ready = 1;
+		timer = 0;
+	}
 }
 
 
 int main() {
-    // Init hardware modules
-    leds_init();
-    queue_init(&rx_queue, 128);
-    uart_init(115200);
-    uart_set_rx_callback(uart_rx_isr);
-    uart_enable();
-    timer_init(TIMER_PERIOD);
-    timer_set_callback(timer_isr);
-    gpio_set_mode(P_SW, PullDown);          // Button --> Pulldown
-    gpio_set_trigger(P_SW, Rising);      		// Trigger on rising edge
-    gpio_set_callback(P_SW, button_isr); 
+		
 	
-		NVIC_SetPriority(EXTI15_10_IRQn, 0);  // Button on EXTI15_10
-    NVIC_SetPriority(USART2_IRQn, 1);     
+	// Initialize the receive queue and UART
+	queue_init(&rx_queue, 64);
+	uart_init(115200);
+	uart_set_rx_callback(uart_rx_isr); 
+	uart_enable(); 
 	
-    __enable_irq(); // Enable global interrupts
+	// Initiate leds
+	leds_init();
+	
+	// Initialize timer
+	timer_set_callback(timer_callback);
+	timer_init(100000);  // 100ms
+	timer_disable();
+	
+	// Initialize button
+	gpio_set_mode(BUTTON_PIN, PullDown);            // Configure as pulldown input
+	gpio_set_trigger(BUTTON_PIN, Rising);           // Interrupt on rising edge
+	gpio_set_callback(BUTTON_PIN, button_callback); 
+	
+	NVIC_SetPriority(EXTI15_10_IRQn, 0);
+	NVIC_SetPriority(USART2_IRQn, 1);
+	
+	__enable_irq(); // Enable interrupts
+	
+	uart_print("\r\n");// Print newline
+	
+	while (1) {
+		
+    handle_uart_input();   // Checks and updates input_buffer, sets new_input_received
 
-    uint8_t rx_char = 0;
-    uint32_t buff_index = 0;
+    if (new_input_received) {
+			input_length = strlen(input_staging);
+			current_digit_index = 0;
+			digit_ready = 0;
+			new_input_received = 0;
+			input_active = 1;
 
-    uart_print("\r\nInput:");
 
-    while (1) {
-        // Wait for input characters
-        while (!queue_dequeue(&rx_queue, &rx_char)) {
-					
-					if (print_msg_button) {
-            uart_print(button_msg);    
-            print_msg_button = false;
-					}
-					
-					if (print_msg_led) {
-						uart_print(led_msg);
-						print_msg_led = false;
-					}
-					__WFI(); // Sleep until interrupt fires
-				}
+			timer_enable();  // ?? restart processing
+	}
 
-        // If input is already being processed and you have new input, cancel old proccess immediately
-        if (input_ready) {
-					repeat_proccess = false;
-					timer_disable();             		// Stop current analysis
-					input_ready = false;         		// Mark as ready for new input
-					uart_print("\r\nInput:");    	
-					buff_index = 0;
-					memset(buff, 0, sizeof(buff)); 	// Clear the buffer completely
-        }
+    if (input_active && digit_ready) {
+        digit_ready = 0;
 
-        // Handle backspace
-        if (rx_char == 0x7F) {
-					if (buff_index > 0) {
-							buff_index--;
-							uart_tx(rx_char); // Echo backspace
-					}
+        if (current_digit_index < input_length) {
+            char digit = input_staging[current_digit_index++];
+            if (digit >= '0' && digit <= '9') {
+                process_digit(digit);
+            } else if (digit == '-') {
+                current_digit_index = 0; // loop
+            }
         } else {
-					// Echo character and store
-					uart_tx(rx_char);
-					buff[buff_index++] = (char)rx_char;
+            input_active = 0;
+            uart_print("End of sequence. Waiting for new number...\r\n");
         }
-
-        // If Enter was pressed, mark input complete and start processing
-        if (rx_char == '\r') {
-					if (buff[buff_index -2] == '-')
-						repeat_proccess = true;			// If last character is '-', repeat proccess
-					buff[buff_index - 1] = '\0';  // Replace '\r' with string terminator
-					uart_print("\r\n");           
-					currentBuffIndex = 0;         
-					input_ready = true;           // Mark input as ready for proccessing
-					timer_enable();               // Begin digit proccessing
-        }
-
-        // Buffer overflow warning
-        if (buff_index >= BUFF_SIZE) {
-					uart_print("Stop trying to overflow my buffer! I resent that!\r\n");
-					buff_index = 0;
-        }
-				
-				
     }
+
+	}
+		
+		
+	
 }
